@@ -14,3 +14,7 @@ results/*
 .DS_Store
 .env.local
 .env*
+models/*.onnx
+models/*.onnx.data
+models/*.json
+models/*.log
