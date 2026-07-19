@@ -1,5 +1,5 @@
 """İsimle segmenter üretimi. Yeni model eklemek = MODEL_SPECS'e satır eklemek."""
-from bgr.segmenter import BiRefNetSegmenter, LocalBiRefNetSegmenter, Segmenter
+from typing import Any
 
 MODEL_SPECS: dict[str, dict] = {
     "lucida": {"model_id": "egeorcun/lucida", "input_size": 1024},
@@ -45,7 +45,8 @@ _GATED_HELP = (
 )
 
 
-def get_segmenter(name: str) -> Segmenter:
+def get_segmenter(name: str) -> Any:
+    from bgr.segmenter import BiRefNetSegmenter, LocalBiRefNetSegmenter
     from bgr.pipeline import PipelineSegmenter
 
     base_name, _, suffix = name.partition("+")

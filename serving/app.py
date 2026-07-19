@@ -7,7 +7,6 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image
 
-from bgr.pipeline import PipelineSegmenter
 from bgr.registry import MODEL_SPECS, get_segmenter
 
 app = FastAPI(title="my-bg-remover")
@@ -47,6 +46,8 @@ def remove(
     refine: bool = False,
     decontaminate: bool = True,
 ):
+    from bgr.pipeline import PipelineSegmenter
+
     try:
         seg = _load_segmenter(model + ("+refine" if refine else ""))
     except KeyError:
