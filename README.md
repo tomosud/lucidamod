@@ -4,6 +4,9 @@
 
 **[Open the browser demo](https://tomosud.github.io/lucidamod/web_onnx/)**
 
+<img width="1135" height="901" alt="image" src="https://github.com/user-attachments/assets/3fcc49e2-6952-4dd4-9c16-298b348ebb61" />
+
+
 This repository contains an experimental browser implementation of
 [Lucida](https://github.com/egeorcun/lucida), a BiRefNet fine-tune for background removal that
 preserves glass, camouflage, text, glow, and line art. Inference runs locally in the browser with
