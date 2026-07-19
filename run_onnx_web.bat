@@ -14,13 +14,6 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-if not exist "models\lucida-web-1024-fp16.onnx" (
-    echo ERROR: models\lucida-web-1024-fp16.onnx was not found.
-    echo Run the ONNX export first. See docs\onnx.md.
-    popd
-    pause
-    exit /b 1
-)
 
 set "WEB_URL=http://127.0.0.1:8760/web_onnx/"
 echo Opening %WEB_URL%

@@ -23,9 +23,5 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    model = ROOT / "models" / "lucida-web-1024-fp16.onnx"
-    if not model.exists():
-        raise SystemExit(f"ONNX model not found: {model}")
     print(f"Lucida ONNX Web test: http://{HOST}:{PORT}/web_onnx/", flush=True)
-    print(f"Model: {model.name} ({model.stat().st_size / 1024**2:.1f} MiB)", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

@@ -1,6 +1,7 @@
 (function () {
   "use strict";
-  const MODEL = "/models/lucida-web-1024-fp16.onnx";
+  const MODEL = "https://huggingface.co/tomohisa/lucida-web/resolve/main/lucida-web-1024-fp16.onnx?download=true";
+  const EXPECTED_MODEL_BYTES = 472615213;
   const SIZE = 1024;
   let session = null;
   let busy = false;
@@ -20,6 +21,7 @@
   const work = $("work");
   const timing = $("timing");
   const logOutput = $("logOutput");
+  const modelProgress = $("modelProgress");
 
   function log(message, data) {
     const now = new Date().toLocaleTimeString("ja-JP", { hour12: false });
@@ -108,10 +110,53 @@
     meta.textContent = `lucida-web-1024-fp16.onnx / ${(bytes / 1024 / 1024).toFixed(1)} MiB / WebGPU`;
     log("モデルHEAD成功", { status: response.status, bytes, contentType: response.headers.get("content-type") });
   }).catch((error) => {
-    log("モデルHEAD失敗", describeError(error));
-    meta.textContent = "モデルを確認できません: " + String(error);
-    loadBtn.disabled = true;
-    setState("error", "モデルがありません", "1024 FP16版ONNXを先に生成してください。");
+    meta.textContent = "lucida-web-1024-fp16.onnx / 約450.7 MiB / Hugging Face / WebGPU";
+    log("モデルHEAD取得不可（DLは試行可能）", describeError(error));
+  });
+
+  function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "計算中";
+    if (seconds < 60) return `${Math.ceil(seconds)}秒`;
+    return `${Math.floor(seconds / 60)}分${Math.ceil(seconds % 60)}秒`;
+  }
+
+
+  let lastModelProgressLog = -5;
+
+  async function setupModelServiceWorker() {
+    if (!("serviceWorker" in navigator)) throw new Error("このブラウザはService Workerに対応していません。");
+    await navigator.serviceWorker.register("model-sw.js", { scope: "./" });
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      if (!sessionStorage.getItem("lucida-sw-reload")) {
+        sessionStorage.setItem("lucida-sw-reload", "1");
+        location.reload();
+        await new Promise(() => {});
+      }
+      throw new Error("モデルDL用Service Workerを有効にするためページを再読み込みしてください。");
+    }
+    sessionStorage.removeItem("lucida-sw-reload");
+    log("モデルDL Service Worker準備完了");
+  }
+
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    const message = event.data;
+    if (!message || message.type !== "lucida-model-progress") return;
+    const elapsed = Math.max(message.elapsedSeconds, 0.001);
+    const speed = message.received / elapsed;
+    const percent = Math.min(100, message.received / message.total * 100);
+    const eta = message.total > message.received ? (message.total - message.received) / speed : 0;
+    modelProgress.hidden = false;
+    modelProgress.value = percent;
+    detail.textContent = `${(message.received / 1024 ** 2).toFixed(1)} / ${(message.total / 1024 ** 2).toFixed(1)} MiB  `
+      + `${percent.toFixed(1)}%  ${(speed / 1024 ** 2).toFixed(1)} MiB/s  残り ${formatDuration(eta)}`;
+    if (message.done || percent >= lastModelProgressLog + 5) {
+      lastModelProgressLog = Math.floor(percent / 5) * 5;
+      log(message.done ? "Hugging FaceモデルDL完了" : "モデルDL進捗", {
+        percent: Number(percent.toFixed(1)), received: message.received, total: message.total,
+        speedMiBs: Number((speed / 1024 ** 2).toFixed(1)), etaSeconds: Math.ceil(eta),
+      });
+    }
   });
 
   async function verifyWebGpu() {
@@ -133,16 +178,23 @@
     busy = true;
     loadBtn.disabled = true;
     const started = performance.now();
-    setState("loading", "モデルを読み込み中", "約448 MiBを読み込み、WebGPUセッションを作成しています。");
+    setState("loading", "Hugging Faceからモデルをダウンロード中", "ダウンロードを開始しています...");
     log("InferenceSession.create開始", memorySnapshot());
     try {
       await verifyWebGpu();
+      await setupModelServiceWorker();
+      lastModelProgressLog = -5;
+      modelProgress.hidden = false;
+      modelProgress.value = 0;
+      setState("loading", "WebGPUセッションを構築中", "ダウンロード完了。モデルをGPU用に準備しています...");
+      log("Hugging Face URLからセッション読込開始", { source: MODEL, memory: memorySnapshot() });
       session = await ort.InferenceSession.create(MODEL, {
         executionProviders: ["webgpu"],
         graphOptimizationLevel: "all",
         logSeverityLevel: 0,
         logVerbosityLevel: 1,
       });
+      modelProgress.hidden = true;
       const seconds = (performance.now() - started) / 1000;
       log("InferenceSession.create成功", {
         seconds,
@@ -157,7 +209,10 @@
       log("InferenceSession.create失敗", describeError(error));
       setState("error", "モデル読込エラー", describeError(error).message);
       loadBtn.disabled = false;
-    } finally { busy = false; }
+    } finally {
+      busy = false;
+      if (!session) modelProgress.hidden = true;
+    }
   });
 
   drop.addEventListener("click", () => { if (session && !busy) fileInput.click(); });

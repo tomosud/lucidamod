@@ -10,7 +10,7 @@ weights and internal compute tensors to FP16. Browser I/O is also FP16; the Java
 ```
 
 Start the separate browser experiment with `run_onnx_web.bat`, then use the page it opens at
-`http://127.0.0.1:8760/web_onnx/`. This experiment requests only ONNX Runtime Web's `webgpu`
+`http://127.0.0.1:8760/web_onnx/`. A Service Worker streams the model once from `tomohisa/lucida-web` on Hugging Face directly into ONNX Runtime while displaying transferred MiB, percentage, speed, and ETA. It does not retain a second 450 MiB JavaScript copy. The first visit may reload once to activate the Service Worker. A local ONNX file is not required. This experiment requests only ONNX Runtime Web's `webgpu`
 execution provider; it deliberately does not fall back to WASM/CPU. Use a current Chrome or Edge.
 The diagnostic log reports whether WebGPU is exposed, the selected adapter information available
 from the browser, its buffer limits, session creation, and inference timings.
