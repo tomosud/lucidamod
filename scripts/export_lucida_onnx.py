@@ -4,28 +4,10 @@ import argparse, json, time
 from pathlib import Path
 import numpy as np
 import torch
-from torch.onnx import register_custom_op_symbolic
-from torch.onnx.symbolic_helper import parse_args
 from transformers import AutoModelForImageSegmentation
+from deform_conv_web import replace_deform_conv2d
 
 
-@parse_args("v", "v", "v", "v", "v", "i", "i", "i", "i", "i", "i", "i", "i", "b")
-def _deform_conv2d_symbolic(
-    g, input, weight, offset, mask, bias, stride_h, stride_w, pad_h, pad_w,
-    dilation_h, dilation_w, groups, offset_groups, use_mask,
-):
-    """Map torchvision's native op to the standard ONNX DeformConv-19 op."""
-    inputs = [input, weight, offset, bias]
-    if use_mask:
-        inputs.append(mask)
-    return g.op(
-        "DeformConv", *inputs,
-        strides_i=[stride_h, stride_w],
-        pads_i=[pad_h, pad_w, pad_h, pad_w],
-        dilations_i=[dilation_h, dilation_w],
-        group_i=groups,
-        offset_group_i=offset_groups,
-    )
 
 
 class AlphaMaskModel(torch.nn.Module):
@@ -46,8 +28,9 @@ def export_model(model_id: str, output: Path, input_size: int, opset: int) -> No
         model_id, trust_remote_code=True, dtype=torch.float32
     ).eval()
     model = AlphaMaskModel(base).eval()
+    replaced = replace_deform_conv2d(base)
+    print(f"Replaced {replaced} DeformConv2d layers with web-compatible operations", flush=True)
     sample = torch.zeros(1, 3, input_size, input_size, dtype=torch.float32)
-    register_custom_op_symbolic("torchvision::deform_conv2d", _deform_conv2d_symbolic, opset)
     print(f"Exporting FP32 ONNX ({input_size}x{input_size}, opset {opset}) ...", flush=True)
     started = time.perf_counter()
     with torch.inference_mode():
