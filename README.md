@@ -5,6 +5,20 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/egeorcun/lucida?style=social)](https://github.com/egeorcun/lucida/stargazers)
 
+## Quick start on Windows
+
+Lucida can be tried easily on Windows without setting up Python commands manually:
+
+1. Double-click `setup.bat` once. It creates `.venv` inside this repository and installs all
+   required packages.
+2. Double-click `run.bat`. It starts the local application and opens
+   [http://127.0.0.1:8756/](http://127.0.0.1:8756/) in your browser.
+3. Drop an image into the page and wait for the transparent PNG result.
+
+The first image downloads and loads the selected model, so it can take a while. Processing on a
+CPU-only environment may also take several minutes; the web UI displays the current stage and
+elapsed time. Keep the `run.bat` window open while using Lucida and close it to stop the server.
+
 **Background removal that keeps what matters: glass, camouflage, text, glow and line art.**
 
 Lucida is a [BiRefNet](https://github.com/ZhengPeng7/BiRefNet)-based image matting model fine-tuned

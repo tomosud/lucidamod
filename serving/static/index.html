@@ -1,180 +1,40 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lucida — Background Remover</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lucida Background Remover</title>
 <style>
-  :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --border: #2a2f3a;
-    --text: #e6e8ee;
-    --muted: #8b93a5;
-    --accent: #7c9cff;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 2.5rem 1rem;
-  }
-  h1 { font-size: 1.6rem; letter-spacing: 0.04em; }
-  h1 span { color: var(--accent); }
-  p.tagline { color: var(--muted); margin: 0.4rem 0 1.6rem; font-size: 0.9rem; }
-  .controls {
-    display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
-    justify-content: center; margin-bottom: 1.2rem;
-  }
-  label { color: var(--muted); font-size: 0.85rem; }
-  select {
-    background: var(--panel); color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px;
-    padding: 0.45rem 0.7rem; font-size: 0.9rem;
-  }
-  #drop {
-    width: min(680px, 100%);
-    border: 2px dashed var(--border);
-    border-radius: 14px;
-    background: var(--panel);
-    padding: 3rem 1.5rem;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-    color: var(--muted);
-  }
-  #drop.dragover { border-color: var(--accent); background: #1b2030; }
-  #drop strong { color: var(--text); }
-  #file { display: none; }
-  #status { margin-top: 1rem; color: var(--muted); font-size: 0.9rem; min-height: 1.2em; }
-  #status.error { color: #ff7b7b; }
-  #result { margin-top: 1.4rem; display: none; flex-direction: column; align-items: center; gap: 1rem; }
-  #result img {
-    max-width: min(680px, 90vw);
-    max-height: 60vh;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    /* transparency checkerboard */
-    background:
-      conic-gradient(#3a3f4b 0 25%, #262a33 0 50%, #3a3f4b 0 75%, #262a33 0) 0 0 / 24px 24px;
-  }
-  a.btn {
-    display: inline-block;
-    background: var(--accent); color: #0c0f16;
-    font-weight: 600; text-decoration: none;
-    padding: 0.55rem 1.3rem; border-radius: 8px; font-size: 0.95rem;
-  }
-  a.btn:hover { filter: brightness(1.1); }
+:root{--bg:#0f1115;--panel:#171a21;--border:#303747;--text:#e8ebf2;--muted:#93a0b8;--accent:#7c9cff;--ok:#55d68b;--error:#ff7b7b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:34px 16px}
+h1{margin:0;font-size:1.7rem;letter-spacing:.03em}h1 span{color:var(--accent)}.tagline{color:var(--muted);margin:8px 0 26px}.controls{display:flex;gap:12px;align-items:center;margin-bottom:20px}label{color:var(--muted)}select{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 14px;font-size:.95rem}
+#drop{width:min(750px,100%);border:2px dashed var(--border);border-radius:15px;background:var(--panel);padding:46px 20px;text-align:center;cursor:pointer;color:var(--muted);transition:.15s}#drop:hover,#drop.dragover{border-color:var(--accent);background:#1b2030}#drop.busy{cursor:wait;opacity:.7}#drop strong{color:var(--text)}#file{display:none}
+#statusPanel{width:min(750px,100%);margin-top:18px;padding:16px 18px;border:1px solid var(--border);border-radius:12px;background:var(--panel);display:flex;gap:14px;align-items:center}#statusPanel.idle .spinner,#statusPanel.complete .spinner,#statusPanel.error .spinner{display:none}.spinner{width:24px;height:24px;border:3px solid #34405b;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:none}@keyframes spin{to{transform:rotate(360deg)}}
+.statusText{flex:1}.statusTop{display:flex;justify-content:space-between;gap:12px}.statusTitle{font-weight:650}.elapsed{color:var(--accent);font-variant-numeric:tabular-nums}.statusDetail{color:var(--muted);font-size:.88rem;margin-top:5px}#statusPanel.complete{border-color:#2c704b}#statusPanel.complete .statusTitle{color:var(--ok)}#statusPanel.error{border-color:#783d45}#statusPanel.error .statusTitle{color:var(--error)}
+#result{margin-top:20px;display:none;flex-direction:column;align-items:center;gap:14px}#result img{max-width:min(750px,90vw);max-height:55vh;border:1px solid var(--border);border-radius:10px;background:conic-gradient(#3a3f4b 0 25%,#262a33 0 50%,#3a3f4b 0 75%,#262a33 0) 0 0/24px 24px}.btn{background:var(--accent);color:#0c0f16;font-weight:700;text-decoration:none;padding:10px 22px;border-radius:8px}
 </style>
 </head>
 <body>
-  <h1><span>Lucida</span> Background Remover</h1>
-  <p class="tagline">Drop an image, get a transparent PNG.</p>
-
-  <div class="controls">
-    <label for="model">Model</label>
-    <select id="model"></select>
-  </div>
-
-  <div id="drop">
-    <strong>Drag &amp; drop</strong> an image here, or <strong>click to choose a file</strong>
-  </div>
-  <input type="file" id="file" accept="image/*">
-
-  <div id="status"></div>
-
-  <div id="result">
-    <img id="preview" alt="Result with transparent background">
-    <a id="download" class="btn" download="lucida-output.png">Download PNG</a>
-  </div>
-
+<h1><span>Lucida</span> Background Remover</h1>
+<p class="tagline">画像をドロップして、背景が透明なPNGを作成します。</p>
+<div class="controls"><label for="model">モデル</label><select id="model"></select></div>
+<div id="drop"><strong>画像をドラッグ＆ドロップ</strong> または <strong>クリックして選択</strong></div>
+<input type="file" id="file" accept="image/*">
+<div id="statusPanel" class="idle"><div class="spinner"></div><div class="statusText"><div class="statusTop"><span class="statusTitle" id="statusTitle">準備完了</span><span class="elapsed" id="elapsed"></span></div><div class="statusDetail" id="statusDetail">画像を選択してください。</div></div></div>
+<div id="result"><img id="preview" alt="背景除去結果"><a id="download" class="btn" download="lucida-output.png">PNGを保存</a></div>
 <script>
-(function () {
-  var drop = document.getElementById("drop");
-  var fileInput = document.getElementById("file");
-  var modelSel = document.getElementById("model");
-  var statusEl = document.getElementById("status");
-  var resultEl = document.getElementById("result");
-  var preview = document.getElementById("preview");
-  var download = document.getElementById("download");
-  var currentUrl = null;
-
-  fetch("/models")
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      data.models.forEach(function (name) {
-        var opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        if (name === data.default) opt.selected = true;
-        modelSel.appendChild(opt);
-      });
-    })
-    .catch(function () { setStatus("Could not load model list.", true); });
-
-  function setStatus(msg, isError) {
-    statusEl.textContent = msg;
-    statusEl.className = isError ? "error" : "";
-  }
-
-  function handleFile(file) {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setStatus("Please choose an image file.", true);
-      return;
-    }
-    setStatus("Processing… (first request downloads the model, this can take a while)");
-    resultEl.style.display = "none";
-
-    var form = new FormData();
-    form.append("file", file, file.name);
-    var url = "/remove?model=" + encodeURIComponent(modelSel.value);
-
-    fetch(url, { method: "POST", body: form })
-      .then(function (r) {
-        if (!r.ok) {
-          return r.text().then(function (t) { throw new Error(t || ("HTTP " + r.status)); });
-        }
-        return r.blob();
-      })
-      .then(function (blob) {
-        if (currentUrl) URL.revokeObjectURL(currentUrl);
-        currentUrl = URL.createObjectURL(blob);
-        preview.src = currentUrl;
-        download.href = currentUrl;
-        var base = file.name.replace(/\.[^.]+$/, "");
-        download.download = base + "-lucida.png";
-        resultEl.style.display = "flex";
-        setStatus("Done.");
-      })
-      .catch(function (err) {
-        setStatus("Error: " + err.message, true);
-      });
-  }
-
-  drop.addEventListener("click", function () { fileInput.click(); });
-  fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
-
-  ["dragenter", "dragover"].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) {
-      e.preventDefault();
-      drop.classList.add("dragover");
-    });
-  });
-  ["dragleave", "drop"].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) {
-      e.preventDefault();
-      drop.classList.remove("dragover");
-    });
-  });
-  drop.addEventListener("drop", function (e) {
-    handleFile(e.dataTransfer.files[0]);
-  });
+(function(){
+var drop=document.getElementById('drop'),fileInput=document.getElementById('file'),modelSel=document.getElementById('model'),panel=document.getElementById('statusPanel'),title=document.getElementById('statusTitle'),detail=document.getElementById('statusDetail'),elapsed=document.getElementById('elapsed'),result=document.getElementById('result'),preview=document.getElementById('preview'),download=document.getElementById('download');
+var busy=false,startTime=0,timer=null,poller=null,currentUrl=null;
+var labels={idle:'準備完了',loading:'モデルを読み込み中',reading:'画像を読み込み中',processing:'背景を除去しています',encoding:'PNGを作成中',complete:'完了',error:'エラー'};
+function formatTime(sec){var m=Math.floor(sec/60),s=sec%60;return m?m+'分 '+String(s).padStart(2,'0')+'秒':s+'秒'}
+function setState(phase,message){panel.className=phase;title.textContent=labels[phase]||message||phase;detail.textContent=message||'';if(phase==='error'||phase==='complete')stopTracking()}
+function startTracking(){startTime=Date.now();elapsed.textContent='0秒';timer=setInterval(function(){elapsed.textContent=formatTime(Math.floor((Date.now()-startTime)/1000))},1000);poller=setInterval(pollStatus,700)}
+function stopTracking(){clearInterval(timer);clearInterval(poller);timer=poller=null}
+function pollStatus(){fetch('/status',{cache:'no-store'}).then(function(r){return r.json()}).then(function(s){var msg=s.message||'';if(s.phase==='processing')msg+='。CPU実行では数分かかる場合があります。画面を閉じずにお待ちください。';setState(s.phase,msg)}).catch(function(){detail.textContent='サーバーから状態を取得できません。run.batの画面を確認してください。'})}
+fetch('/models').then(function(r){return r.json()}).then(function(data){data.models.forEach(function(name){var o=document.createElement('option');o.value=name;o.textContent=name;o.selected=name===data.default;modelSel.appendChild(o)})}).catch(function(){setState('error','モデル一覧を取得できません。')});
+function handleFile(file){if(!file||busy)return;if(!file.type.startsWith('image/')){setState('error','画像ファイルを選択してください。');return}busy=true;drop.classList.add('busy');modelSel.disabled=true;result.style.display='none';setState('loading','処理を開始しています。初回はモデルのダウンロードと読み込みに時間がかかります。');startTracking();var form=new FormData();form.append('file',file,file.name);fetch('/remove?model='+encodeURIComponent(modelSel.value),{method:'POST',body:form}).then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t||('HTTP '+r.status))});return r.blob()}).then(function(blob){if(currentUrl)URL.revokeObjectURL(currentUrl);currentUrl=URL.createObjectURL(blob);preview.src=currentUrl;download.href=currentUrl;download.download=file.name.replace(/\.[^.]+$/,'')+'-lucida.png';result.style.display='flex';setState('complete','透明PNGを作成しました。続けて別の画像も処理できます。')}).catch(function(e){setState('error','処理に失敗しました: '+e.message)}).finally(function(){busy=false;drop.classList.remove('busy');modelSel.disabled=false;fileInput.value=''})}
+drop.addEventListener('click',function(){if(!busy)fileInput.click()});fileInput.addEventListener('change',function(){handleFile(fileInput.files[0])});['dragenter','dragover'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();if(!busy)drop.classList.add('dragover')})});['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('dragover')})});drop.addEventListener('drop',function(e){handleFile(e.dataTransfer.files[0])});
 })();
 </script>
 </body>

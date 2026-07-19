@@ -14,6 +14,19 @@ _STATIC_DIR = Path(__file__).parent / "static"
 _DEFAULT_MODEL = "lucida"
 _SEGMENTERS: dict[str, object] = {}
 _SEGMENTERS_LOCK = threading.Lock()
+_STATUS_LOCK = threading.Lock()
+_STATUS = {"phase": "idle", "message": "Ready", "model": None}
+
+
+def _set_status(phase: str, message: str, model: str | None = None):
+    with _STATUS_LOCK:
+        _STATUS.update(phase=phase, message=message, model=model)
+
+
+@app.get("/status")
+def status():
+    with _STATUS_LOCK:
+        return {**_STATUS, "loaded_models": sorted(_SEGMENTERS)}
 
 
 def _load_segmenter(name: str):
@@ -48,17 +61,35 @@ def remove(
 ):
     from bgr.pipeline import PipelineSegmenter
 
+    model_key = model + ("+refine" if refine else "")
     try:
-        seg = _load_segmenter(model + ("+refine" if refine else ""))
+        if model_key in _SEGMENTERS:
+            _set_status("processing", "Running background removal", model)
+        else:
+            _set_status("loading", "Loading model into memory", model)
+        seg = _load_segmenter(model_key)
     except KeyError:
+        _set_status("error", "Unknown model", model)
         raise HTTPException(400, f"bilinmeyen model: {model}")
+    except Exception as exc:
+        _set_status("error", f"Model loading failed: {exc}", model)
+        raise
     try:
+        _set_status("reading", "Reading input image", model)
         img = Image.open(io.BytesIO(file.file.read()))
         img.load()
     except Exception:
+        _set_status("error", "Invalid image file", model)
         raise HTTPException(400, "geçersiz görsel dosyası")
-    pipe = seg if isinstance(seg, PipelineSegmenter) else PipelineSegmenter(seg)
-    out = pipe.process(img, decontaminate=decontaminate)
-    buf = io.BytesIO()
-    out.save(buf, format="PNG")
-    return Response(buf.getvalue(), media_type="image/png")
+    try:
+        _set_status("processing", "Running background removal", model)
+        pipe = seg if isinstance(seg, PipelineSegmenter) else PipelineSegmenter(seg)
+        out = pipe.process(img, decontaminate=decontaminate)
+        _set_status("encoding", "Creating transparent PNG", model)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        _set_status("complete", "Completed", model)
+        return Response(buf.getvalue(), media_type="image/png")
+    except Exception as exc:
+        _set_status("error", f"Processing failed: {exc}", model)
+        raise
