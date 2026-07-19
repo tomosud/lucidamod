@@ -188,12 +188,17 @@
       const pixels = context.getImageData(0, 0, SIZE, SIZE).data;
       const plane = SIZE * SIZE;
       const data = new Uint16Array(3 * plane);
+      const rgb = new Float32Array(3 * plane);
       const mean = [.485, .456, .406];
       const std = [.229, .224, .225];
       for (let i = 0; i < plane; i++) {
-        data[i] = float32ToFloat16Bits((pixels[i * 4] / 255 - mean[0]) / std[0]);
-        data[plane + i] = float32ToFloat16Bits((pixels[i * 4 + 1] / 255 - mean[1]) / std[1]);
-        data[2 * plane + i] = float32ToFloat16Bits((pixels[i * 4 + 2] / 255 - mean[2]) / std[2]);
+        const offset = i * 3;
+        rgb[offset] = pixels[i * 4] / 255;
+        rgb[offset + 1] = pixels[i * 4 + 1] / 255;
+        rgb[offset + 2] = pixels[i * 4 + 2] / 255;
+        data[i] = float32ToFloat16Bits((rgb[offset] - mean[0]) / std[0]);
+        data[plane + i] = float32ToFloat16Bits((rgb[offset + 1] - mean[1]) / std[1]);
+        data[2 * plane + i] = float32ToFloat16Bits((rgb[offset + 2] - mean[2]) / std[2]);
       }
       log("前処理完了", { tensorShape: [1, 3, SIZE, SIZE], tensorMiB: data.byteLength / 1024 / 1024 });
 
@@ -215,11 +220,13 @@
       const readAlpha = alphaIsBitArray
         ? (index) => float16BitsToFloat32(alpha[index])
         : (index) => Number(alpha[index]);
+      const alphaFloat = new Float32Array(alpha.length);
       let alphaMin = Infinity;
       let alphaMax = -Infinity;
       let alphaSum = 0;
       for (let p = 0; p < alpha.length; p++) {
         const value = readAlpha(p);
+        alphaFloat[p] = value;
         alphaMin = Math.min(alphaMin, value);
         alphaMax = Math.max(alphaMax, value);
         alphaSum += value;
@@ -229,24 +236,27 @@
         interpretedAsBits: alphaIsBitArray, min: alphaMin, max: alphaMax,
         mean: alphaSum / alpha.length, samples: Array.from({ length: 8 }, (_, i) => readAlpha(i)),
       });
+      const postStarted = performance.now();
+      log("PhotoRoom前景色補正開始", { kernelSizes: [90, 6], pixels: plane });
+      const foreground = estimateForegroundPhotoRoom(rgb, alphaFloat, SIZE, SIZE);
+      const postSeconds = (performance.now() - postStarted) / 1000;
+      log("PhotoRoom前景色補正完了", { seconds: postSeconds, memory: memorySnapshot() });
       const mask = context.createImageData(SIZE, SIZE);
       for (let p = 0; p < plane; p++) {
-        const value = Math.max(0, Math.min(255, Math.round(readAlpha(p) * 255)));
-        mask.data[p * 4] = 255;
-        mask.data[p * 4 + 1] = 255;
-        mask.data[p * 4 + 2] = 255;
+        const value = Math.max(0, Math.min(255, Math.round(alphaFloat[p] * 255)));
+        mask.data[p * 4] = Math.round(foreground[p * 3] * 255);
+        mask.data[p * 4 + 1] = Math.round(foreground[p * 3 + 1] * 255);
+        mask.data[p * 4 + 2] = Math.round(foreground[p * 3 + 2] * 255);
         mask.data[p * 4 + 3] = value;
       }
       context.putImageData(mask, 0, 0);
       output.width = width;
       output.height = height;
       const outputContext = output.getContext("2d");
-      outputContext.drawImage(image, 0, 0, width, height);
-      outputContext.globalCompositeOperation = "destination-in";
+      outputContext.clearRect(0, 0, width, height);
       outputContext.drawImage(work, 0, 0, width, height);
-      outputContext.globalCompositeOperation = "source-over";
       result.style.display = "block";
-      timing.textContent = `推論時間: ${seconds.toFixed(1)}秒`;
+      timing.textContent = `推論: ${seconds.toFixed(1)}秒 / 色補正: ${postSeconds.toFixed(1)}秒`;
       setState("done", "完了", "処理はブラウザ内だけで完了しました。");
     } catch (error) {
       const diagnostic = describeError(error);

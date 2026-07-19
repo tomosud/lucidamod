@@ -23,6 +23,7 @@ Preprocessing is RGB resize, float conversion, NCHW layout, then ImageNet mean/s
 The ONNX output already includes sigmoid and is an alpha mask in `[0, 1]`.
 
 Wide Concat nodes from the DeformConv lowering are rewritten as trees with at most seven inputs. This keeps input plus output storage-buffer bindings within WebGPU's default per-stage limit of eight.
+`r`nThe browser test applies a two-pass blur-fusion foreground colour estimate after inference (90 px, then 6 px), based on PhotoRoom's Approximate Fast Foreground Colour Estimation method. It reduces original-background colour bleeding around semi-transparent edges without changing the alpha matte.
 `r`nThe FP16 file is still large because it preserves the original architecture and weights. INT8 is
 mainly worth evaluating for a WASM/CPU target; for this GPU-only experiment, WebGPU + FP16 is the
 first useful 1024 baseline. A genuinely small distributable build will require architecture-level
