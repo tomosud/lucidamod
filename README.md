@@ -1,10 +1,31 @@
-# Lucida
+# Lucida Web
 
-[![HF Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-egeorcun%2Flucida-ffcc4d)](https://huggingface.co/egeorcun/lucida)
-[![Live Demo](https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-lucida--demo-5865f2)](https://huggingface.co/spaces/egeorcun/lucida-demo)
-[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/egeorcun/lucida?style=social)](https://github.com/egeorcun/lucida/stargazers)
+## Web implementation
 
+**[Open the browser demo](https://tomosud.github.io/lucidamod/web_onnx/)**
+
+This repository contains an experimental browser implementation of
+[Lucida](https://github.com/egeorcun/lucida), a BiRefNet fine-tune for background removal that
+preserves glass, camouflage, text, glow, and line art. Inference runs locally in the browser with
+ONNX Runtime Web and WebGPU; uploaded images are not sent to an inference server.
+
+The browser downloads the model (about 451 MiB) from
+[tomohisa/lucida-web](https://huggingface.co/tomohisa/lucida-web) on first use and displays its
+progress. A recent Chromium-based browser and a WebGPU-capable GPU are required.
+
+### Differences from the original implementation
+
+| | This web implementation | Original Lucida |
+|---|---|---|
+| Runtime | ONNX Runtime Web / WebGPU | PyTorch / Python |
+| Processing | Entirely inside the browser | Local Python app, CLI, or HTTP service |
+| Model | Mixed-precision ONNX optimized for browser execution | Original PyTorch weights |
+| Input size | Fixed at 1024 x 1024 for inference | 1024 x 1024 recommended |
+| Edge processing | Browser-side approximate color decontamination | Original Python refinement and decontamination |
+
+Because the runtime, model precision, and edge processing differ, results may not exactly match the
+original implementation. For the reference implementation and full model details, see
+[egeorcun/lucida](https://github.com/egeorcun/lucida).
 ## Quick start on Windows
 
 Lucida can be tried easily on Windows without setting up Python commands manually:
@@ -18,6 +39,18 @@ Lucida can be tried easily on Windows without setting up Python commands manuall
 The first image downloads and loads the selected model, so it can take a while. Processing on a
 CPU-only environment may also take several minutes; the web UI displays the current stage and
 elapsed time. Keep the `run.bat` window open while using Lucida and close it to stop the server.
+To test the WebGPU browser version locally instead, double-click `run_onnx_web.bat`, then open the
+URL shown in its window. This does not require the Python virtual environment created by
+`setup.bat`.
+
+---
+
+## Original Lucida README
+
+[![HF Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-egeorcun%2Flucida-ffcc4d)](https://huggingface.co/egeorcun/lucida)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-lucida--demo-5865f2)](https://huggingface.co/spaces/egeorcun/lucida-demo)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/egeorcun/lucida?style=social)](https://github.com/egeorcun/lucida/stargazers)
 
 **Background removal that keeps what matters: glass, camouflage, text, glow and line art.**
 
