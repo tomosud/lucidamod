@@ -18,3 +18,4 @@ models/*.onnx
 models/*.onnx.data
 models/*.json
 models/*.log
+/.playwright-cli

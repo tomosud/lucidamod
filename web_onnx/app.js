@@ -13,6 +13,8 @@
   let logSequence = 0;
   let lastModelProgressLog = -5;
   let currentSourceName = "image";
+  let pendingPasteFile = null;
+  let pendingPasteUrl = null;
 
   const $ = (id) => document.getElementById(id);
   const status = $("status");
@@ -23,6 +25,10 @@
   const inputOverlay = $("inputOverlay");
   const outputPlaceholder = $("outputPlaceholder");
   const fileInput = $("file");
+  const pasteDialog = $("pasteDialog");
+  const pastePreview = $("pastePreview");
+  const pasteCancel = $("pasteCancel");
+  const pasteProcess = $("pasteProcess");
   const inputPreview = $("inputPreview");
   const output = $("output");
   const work = $("work");
@@ -306,6 +312,58 @@
     return Array.from(fileList || []).find((file) => file && file.type && file.type.startsWith("image/"));
   }
 
+
+  function imageFileFromClipboard(event) {
+    const items = event.clipboardData && event.clipboardData.items ? Array.from(event.clipboardData.items) : [];
+    const item = items.find((entry) => entry.kind === "file" && entry.type && entry.type.startsWith("image/"));
+    if (!item) return null;
+    const blob = item.getAsFile();
+    if (!blob) return null;
+    const extension = blob.type.split("/")[1] || "png";
+    return new File([blob], `clipboard-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`, { type: blob.type });
+  }
+
+  function closePasteDialog(restoreStatus) {
+    pasteDialog.hidden = true;
+    pendingPasteFile = null;
+    if (pendingPasteUrl) URL.revokeObjectURL(pendingPasteUrl);
+    pendingPasteUrl = null;
+    pastePreview.removeAttribute("src");
+    if (restoreStatus) setState("idle", "Ready", "Drop, click, or paste an image on the input panel to begin.");
+  }
+
+  function showPasteDialog(file) {
+    if (!file || busy) return;
+    if (pendingPasteUrl) URL.revokeObjectURL(pendingPasteUrl);
+    pendingPasteFile = file;
+    pendingPasteUrl = URL.createObjectURL(file);
+    pastePreview.src = pendingPasteUrl;
+    pasteDialog.hidden = false;
+    pasteProcess.focus();
+    setState("idle", "Clipboard image ready", "Confirm the preview before processing the pasted image.");
+    log("Clipboard image preview", { name: file.name, type: file.type, bytes: file.size });
+  }
+
+  document.addEventListener("paste", (event) => {
+    if (busy || !pasteDialog.hidden) return;
+    const file = imageFileFromClipboard(event);
+    if (!file) return;
+    event.preventDefault();
+    showPasteDialog(file);
+  });
+
+  pasteCancel.addEventListener("click", () => closePasteDialog(true));
+  pasteDialog.addEventListener("click", (event) => {
+    if (event.target === pasteDialog) closePasteDialog(true);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !pasteDialog.hidden) closePasteDialog(true);
+  });
+  pasteProcess.addEventListener("click", () => {
+    const file = pendingPasteFile;
+    closePasteDialog();
+    if (file) processFile(file);
+  });
   inputViewer.addEventListener("click", () => { if (!busy) fileInput.click(); });
   inputViewer.addEventListener("keydown", (event) => {
     if ((event.key === "Enter" || event.key === " ") && !busy) {
@@ -332,7 +390,7 @@
     inputPreview.getContext("2d").drawImage(image, 0, 0);
     inputViewer.classList.remove("empty");
     inputOverlay.querySelector("strong").textContent = "Drop an image to process";
-    inputOverlay.querySelector("span").textContent = "or click to replace the current image";
+    inputOverlay.querySelector("span").textContent = "click, drop, or paste to replace the current image";
     inputPanZoom.reset();
   }
 
@@ -462,7 +520,7 @@
   if ("serviceWorker" in navigator) {
     setState("loading", "Preparing browser cache", "The page may refresh once to enable model download progress.");
     ensureModelServiceWorker()
-      .then(() => setState("idle", "Ready", "Drop an image on the input panel or click it to begin."))
+      .then(() => setState("idle", "Ready", "Drop, click, or paste an image on the input panel to begin."))
       .catch((error) => {
         log("Model download service worker setup failed", describeError(error));
         setState("error", "Setup error", describeError(error).message);
@@ -480,6 +538,9 @@
     }, "image/png");
   });
 })();
+
+
+
 
 
 
