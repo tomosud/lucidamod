@@ -23,7 +23,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    model = ROOT / "models" / "lucida-web-512-fp32.onnx"
+    model = ROOT / "models" / "lucida-web-1024-fp16.onnx"
     if not model.exists():
         raise SystemExit(f"ONNX model not found: {model}")
     print(f"Lucida ONNX Web test: http://{HOST}:{PORT}/web_onnx/", flush=True)

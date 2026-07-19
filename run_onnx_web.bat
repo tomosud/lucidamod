@@ -14,8 +14,8 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-if not exist "models\lucida-web-512-fp32.onnx" (
-    echo ERROR: models\lucida-web-512-fp32.onnx was not found.
+if not exist "models\lucida-web-1024-fp16.onnx" (
+    echo ERROR: models\lucida-web-1024-fp16.onnx was not found.
     echo Run the ONNX export first. See docs\onnx.md.
     popd
     pause
