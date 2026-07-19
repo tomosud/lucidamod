@@ -1,30 +1,38 @@
 (function () {
   "use strict";
+
   const MODEL = "https://huggingface.co/tomohisa/lucida-web/resolve/main/lucida-web-1024-fp16.onnx?download=true";
   const EXPECTED_MODEL_BYTES = 472615213;
   const SIZE = 1024;
+  const OUTPUT_PREFIX = "lucida-";
+
   let session = null;
+  let sessionPromise = null;
+  let serviceWorkerPromise = null;
   let busy = false;
   let logSequence = 0;
+  let lastModelProgressLog = -5;
+  let currentSourceName = "image";
 
   const $ = (id) => document.getElementById(id);
-  const loadBtn = $("loadModel");
-  const meta = $("modelMeta");
   const status = $("status");
   const title = $("statusTitle");
   const detail = $("statusDetail");
-  const drop = $("drop");
+  const inputViewer = $("inputViewer");
+  const outputViewer = $("outputViewer");
+  const inputOverlay = $("inputOverlay");
+  const outputPlaceholder = $("outputPlaceholder");
   const fileInput = $("file");
-  const result = $("result");
   const inputPreview = $("inputPreview");
   const output = $("output");
   const work = $("work");
   const timing = $("timing");
+  const save = $("save");
   const logOutput = $("logOutput");
   const modelProgress = $("modelProgress");
 
   function log(message, data) {
-    const now = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+    const now = new Date().toLocaleTimeString("en-US", { hour12: false });
     let suffix = "";
     if (data !== undefined) {
       try { suffix = " " + JSON.stringify(data); }
@@ -44,7 +52,7 @@
       value: String(error),
       stack: error && error.stack ? error.stack : null,
       possibleCause: typeof error === "number"
-        ? "ランタイム内部例外です。GPUメモリ不足またはWebGPUカーネル内部失敗の可能性があります。"
+        ? "Internal runtime failure. This often means GPU memory pressure or a WebGPU kernel failure."
         : null,
     };
   }
@@ -91,40 +99,116 @@
     status.className = "status " + kind;
     title.textContent = heading;
     detail.textContent = description || "";
-    log(`状態: ${heading}`, description || "");
+    log(`State: ${heading}`, description || "");
   }
+
+  function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "calculating";
+    if (seconds < 60) return `${Math.ceil(seconds)}s`;
+    return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;
+  }
+
+  function baseName(name) {
+    const clean = (name || "image").replace(/[/\\?%*:|"<>]/g, "_");
+    return clean.replace(/\.[^.]+$/, "") || "image";
+  }
+
+  function createViewer(viewer, canvas) {
+    const state = { zoom: 1, panX: 0, panY: 0, dragging: false, lastX: 0, lastY: 0 };
+
+    function fitScale() {
+      if (!canvas.width || !canvas.height) return 1;
+      const rect = viewer.getBoundingClientRect();
+      return Math.min(rect.width / canvas.width, rect.height / canvas.height, 1);
+    }
+
+    function apply() {
+      if (!canvas.width || !canvas.height) return;
+      const scale = fitScale();
+      canvas.style.width = `${canvas.width * scale}px`;
+      canvas.style.height = `${canvas.height * scale}px`;
+      if (state.zoom <= 1) {
+        state.zoom = 1;
+        state.panX = 0;
+        state.panY = 0;
+      }
+      canvas.style.transform = `translate(calc(-50% + ${state.panX}px), calc(-50% + ${state.panY}px)) scale(${state.zoom})`;
+      viewer.classList.toggle("zoomed", state.zoom > 1.001);
+    }
+
+    function reset() {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+      apply();
+    }
+
+    viewer.addEventListener("wheel", (event) => {
+      if (!canvas.width || !canvas.height) return;
+      event.preventDefault();
+      const oldZoom = state.zoom;
+      const nextZoom = Math.min(8, Math.max(1, oldZoom * Math.exp(-event.deltaY * 0.0015)));
+      const rect = viewer.getBoundingClientRect();
+      const cursorX = event.clientX - rect.left - rect.width / 2;
+      const cursorY = event.clientY - rect.top - rect.height / 2;
+      const ratio = nextZoom / oldZoom;
+      state.panX = cursorX - (cursorX - state.panX) * ratio;
+      state.panY = cursorY - (cursorY - state.panY) * ratio;
+      state.zoom = nextZoom;
+      apply();
+    }, { passive: false });
+
+    viewer.addEventListener("pointerdown", (event) => {
+      if (state.zoom <= 1 || event.button !== 0) return;
+      state.dragging = true;
+      state.lastX = event.clientX;
+      state.lastY = event.clientY;
+      viewer.classList.add("panning");
+      viewer.setPointerCapture(event.pointerId);
+    });
+
+    viewer.addEventListener("pointermove", (event) => {
+      if (!state.dragging) return;
+      state.panX += event.clientX - state.lastX;
+      state.panY += event.clientY - state.lastY;
+      state.lastX = event.clientX;
+      state.lastY = event.clientY;
+      apply();
+    });
+
+    function stopPan(event) {
+      if (!state.dragging) return;
+      state.dragging = false;
+      viewer.classList.remove("panning");
+      try { viewer.releasePointerCapture(event.pointerId); } catch (_) {}
+    }
+    viewer.addEventListener("pointerup", stopPan);
+    viewer.addEventListener("pointercancel", stopPan);
+    new ResizeObserver(apply).observe(viewer);
+    return { reset, apply };
+  }
+
+  const inputPanZoom = createViewer(inputViewer, inputPreview);
+  const outputPanZoom = createViewer(outputViewer, output);
 
   window.addEventListener("error", (event) => log("window.error", describeError(event.error || event.message)));
   window.addEventListener("unhandledrejection", (event) => log("unhandledrejection", describeError(event.reason)));
 
   ort.env.logLevel = "info";
   ort.env.debug = true;
-  log("画面初期化", { model: MODEL, inputSize: SIZE, userAgent: navigator.userAgent });
-  log("実行設定", { executionProvider: "webgpu", cpuFallback: false, fp16: true });
+  log("UI initialized", { model: MODEL, inputSize: SIZE, userAgent: navigator.userAgent });
+  log("Runtime settings", { executionProvider: "webgpu", cpuFallback: false, fp16: true });
   log("WebGPU API", { available: Boolean(navigator.gpu), secureContext: window.isSecureContext });
-  log("ブラウザメモリ", memorySnapshot());
+  log("Browser memory", memorySnapshot());
 
   fetch(MODEL, { method: "HEAD", cache: "no-store" }).then((response) => {
     if (!response.ok) throw new Error("HTTP " + response.status);
     const bytes = Number(response.headers.get("content-length"));
-    meta.textContent = `lucida-web-1024-fp16.onnx / ${(bytes / 1024 / 1024).toFixed(1)} MiB / WebGPU`;
-    log("モデルHEAD成功", { status: response.status, bytes, contentType: response.headers.get("content-type") });
-  }).catch((error) => {
-    meta.textContent = "lucida-web-1024-fp16.onnx / 約450.7 MiB / Hugging Face / WebGPU";
-    log("モデルHEAD取得不可（DLは試行可能）", describeError(error));
-  });
-
-  function formatDuration(seconds) {
-    if (!Number.isFinite(seconds) || seconds < 0) return "計算中";
-    if (seconds < 60) return `${Math.ceil(seconds)}秒`;
-    return `${Math.floor(seconds / 60)}分${Math.ceil(seconds % 60)}秒`;
-  }
-
-
-  let lastModelProgressLog = -5;
+    log("Model HEAD ok", { status: response.status, bytes, contentType: response.headers.get("content-type") });
+  }).catch((error) => log("Model HEAD unavailable; download can still be attempted", describeError(error)));
 
   async function setupModelServiceWorker() {
-    if (!("serviceWorker" in navigator)) throw new Error("このブラウザはService Workerに対応していません。");
+    if (!("serviceWorker" in navigator)) throw new Error("This browser does not support Service Worker.");
     await navigator.serviceWorker.register("model-sw.js", { scope: "./" });
     await navigator.serviceWorker.ready;
     if (!navigator.serviceWorker.controller) {
@@ -133,38 +217,44 @@
         location.reload();
         await new Promise(() => {});
       }
-      throw new Error("モデルDL用Service Workerを有効にするためページを再読み込みしてください。");
+      throw new Error("Reload the page once to activate the model download service worker.");
     }
     sessionStorage.removeItem("lucida-sw-reload");
-    log("モデルDL Service Worker準備完了");
+    log("Model download service worker ready");
+  }
+
+
+  function ensureModelServiceWorker() {
+    if (!serviceWorkerPromise) serviceWorkerPromise = setupModelServiceWorker();
+    return serviceWorkerPromise;
   }
 
   navigator.serviceWorker?.addEventListener("message", (event) => {
     const message = event.data;
     if (!message || message.type !== "lucida-model-progress") return;
+    const total = message.total || EXPECTED_MODEL_BYTES;
     const elapsed = Math.max(message.elapsedSeconds, 0.001);
     const speed = message.received / elapsed;
-    const percent = Math.min(100, message.received / message.total * 100);
-    const eta = message.total > message.received ? (message.total - message.received) / speed : 0;
+    const percent = Math.min(100, message.received / total * 100);
+    const eta = total > message.received ? (total - message.received) / speed : 0;
     modelProgress.hidden = false;
     modelProgress.value = percent;
-    detail.textContent = `${(message.received / 1024 ** 2).toFixed(1)} / ${(message.total / 1024 ** 2).toFixed(1)} MiB  `
-      + `${percent.toFixed(1)}%  ${(speed / 1024 ** 2).toFixed(1)} MiB/s  残り ${formatDuration(eta)}`;
+    detail.textContent = `Downloading model: ${(message.received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB  ${percent.toFixed(1)}%  ${(speed / 1024 ** 2).toFixed(1)} MiB/s  ETA ${formatDuration(eta)}`;
     if (message.done || percent >= lastModelProgressLog + 5) {
       lastModelProgressLog = Math.floor(percent / 5) * 5;
-      log(message.done ? "Hugging FaceモデルDL完了" : "モデルDL進捗", {
-        percent: Number(percent.toFixed(1)), received: message.received, total: message.total,
+      log(message.done ? "Model download complete" : "Model download progress", {
+        percent: Number(percent.toFixed(1)), received: message.received, total,
         speedMiBs: Number((speed / 1024 ** 2).toFixed(1)), etaSeconds: Math.ceil(eta),
       });
     }
   });
 
   async function verifyWebGpu() {
-    if (!navigator.gpu) throw new Error("このブラウザではWebGPU APIを利用できません。最新版のChromeまたはEdgeを使用してください。");
+    if (!navigator.gpu) throw new Error("WebGPU is not available. Use a recent Chrome or Edge build.");
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) throw new Error("WebGPUアダプターを取得できません。ブラウザまたはGPU設定を確認してください。");
+    if (!adapter) throw new Error("Could not get a WebGPU adapter. Check browser and GPU settings.");
     const info = adapter.info || {};
-    log("WebGPUアダプター取得成功", {
+    log("WebGPU adapter ok", {
       vendor: info.vendor, architecture: info.architecture, device: info.device, description: info.description,
       maxBufferSize: adapter.limits.maxBufferSize,
       maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
@@ -173,70 +263,108 @@
       features: Array.from(adapter.features),
     });
   }
-  loadBtn.addEventListener("click", async () => {
-    if (session || busy) return;
-    busy = true;
-    loadBtn.disabled = true;
+
+  async function ensureSession() {
+    if (session) return session;
+    if (sessionPromise) return sessionPromise;
     const started = performance.now();
-    setState("loading", "Hugging Faceからモデルをダウンロード中", "ダウンロードを開始しています...");
-    log("InferenceSession.create開始", memorySnapshot());
-    try {
-      await verifyWebGpu();
-      await setupModelServiceWorker();
+    sessionPromise = (async () => {
+      setState("loading", "Loading model", "First use downloads about 451 MiB from Hugging Face. This may take several minutes.");
       lastModelProgressLog = -5;
       modelProgress.hidden = false;
       modelProgress.value = 0;
-      setState("loading", "WebGPUセッションを構築中", "ダウンロード完了。モデルをGPU用に準備しています...");
-      log("Hugging Face URLからセッション読込開始", { source: MODEL, memory: memorySnapshot() });
-      session = await ort.InferenceSession.create(MODEL, {
+      await verifyWebGpu();
+      await ensureModelServiceWorker();
+      setState("loading", "Preparing WebGPU session", "The model file is available. Compiling GPU kernels now...");
+      log("InferenceSession.create start", memorySnapshot());
+      const created = await ort.InferenceSession.create(MODEL, {
         executionProviders: ["webgpu"],
         graphOptimizationLevel: "all",
         logSeverityLevel: 0,
         logVerbosityLevel: 1,
       });
-      modelProgress.hidden = true;
       const seconds = (performance.now() - started) / 1000;
-      log("InferenceSession.create成功", {
+      session = created;
+      modelProgress.hidden = true;
+      log("InferenceSession.create ok", {
         seconds,
         inputs: session.inputNames,
         outputs: session.outputNames,
         memory: memorySnapshot(),
       });
-      setState("ready", "モデル準備完了", `読込時間: ${seconds.toFixed(1)}秒。画像を選択できます。`);
-      drop.classList.remove("disabled");
-      loadBtn.textContent = "読込済み";
-    } catch (error) {
-      log("InferenceSession.create失敗", describeError(error));
-      setState("error", "モデル読込エラー", describeError(error).message);
-      loadBtn.disabled = false;
-    } finally {
-      busy = false;
-      if (!session) modelProgress.hidden = true;
+      setState("ready", "Model ready", `Model load time: ${seconds.toFixed(1)}s. Running inference...`);
+      return session;
+    })().catch((error) => {
+      sessionPromise = null;
+      modelProgress.hidden = true;
+      throw error;
+    });
+    return sessionPromise;
+  }
+
+  function pickImageFile(fileList) {
+    return Array.from(fileList || []).find((file) => file && file.type && file.type.startsWith("image/"));
+  }
+
+  inputViewer.addEventListener("click", () => { if (!busy) fileInput.click(); });
+  inputViewer.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && !busy) {
+      event.preventDefault();
+      fileInput.click();
     }
   });
+  fileInput.addEventListener("change", () => processFile(pickImageFile(fileInput.files)));
 
-  drop.addEventListener("click", () => { if (session && !busy) fileInput.click(); });
-  fileInput.addEventListener("change", () => processFile(fileInput.files[0]));
-  ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (event) => event.preventDefault()));
-  drop.addEventListener("drop", (event) => {
+  ["dragenter", "dragover"].forEach((name) => inputViewer.addEventListener(name, (event) => {
     event.preventDefault();
-    if (session && !busy) processFile(event.dataTransfer.files[0]);
+    inputViewer.classList.add("dragging");
+  }));
+  ["dragleave", "drop"].forEach((name) => inputViewer.addEventListener(name, () => inputViewer.classList.remove("dragging")));
+  inputViewer.addEventListener("drop", (event) => {
+    event.preventDefault();
+    if (!busy) processFile(pickImageFile(event.dataTransfer.files));
   });
+  ["dragover", "drop"].forEach((name) => window.addEventListener(name, (event) => event.preventDefault()));
+
+  async function drawInput(image) {
+    inputPreview.width = image.width;
+    inputPreview.height = image.height;
+    inputPreview.getContext("2d").drawImage(image, 0, 0);
+    inputViewer.classList.remove("empty");
+    inputOverlay.querySelector("strong").textContent = "Drop an image to process";
+    inputOverlay.querySelector("span").textContent = "or click to replace the current image";
+    inputPanZoom.reset();
+  }
+
+  function clearOutput() {
+    output.width = 0;
+    output.height = 0;
+    outputViewer.classList.add("empty");
+    outputPlaceholder.hidden = false;
+    outputPlaceholder.classList.remove("hidden");
+    save.disabled = true;
+    timing.textContent = "";
+    outputPanZoom.reset();
+  }
 
   async function processFile(file) {
     if (!file || !file.type.startsWith("image/")) return;
+    if (busy) return;
     busy = true;
-    setState("running", "GPUで推論中", `${SIZE}×${SIZE}へ変換してWebGPUで処理しています。`);
-    log("画像処理開始", { name: file.name, type: file.type, bytes: file.size, memory: memorySnapshot() });
+    currentSourceName = file.name || "image";
+    save.disabled = true;
+    clearOutput();
+    setState("running", "Reading image", "Decoding the selected file in the browser.");
+    log("Image processing start", { name: file.name, type: file.type, bytes: file.size, memory: memorySnapshot() });
     try {
       const image = await createImageBitmap(file);
       const width = image.width;
       const height = image.height;
-      log("画像デコード成功", { width, height });
-      inputPreview.width = width;
-      inputPreview.height = height;
-      inputPreview.getContext("2d").drawImage(image, 0, 0);
+      log("Image decode ok", { width, height });
+      await drawInput(image);
+      await ensureSession();
 
+      setState("running", "Running WebGPU inference", `Resizing to ${SIZE}x${SIZE} and running the 16-bit ONNX model.`);
       const context = work.getContext("2d", { willReadFrequently: true });
       context.clearRect(0, 0, SIZE, SIZE);
       context.drawImage(image, 0, 0, SIZE, SIZE);
@@ -255,15 +383,15 @@
         data[plane + i] = float32ToFloat16Bits((rgb[offset + 1] - mean[1]) / std[1]);
         data[2 * plane + i] = float32ToFloat16Bits((rgb[offset + 2] - mean[2]) / std[2]);
       }
-      log("前処理完了", { tensorShape: [1, 3, SIZE, SIZE], tensorMiB: data.byteLength / 1024 / 1024 });
+      log("Preprocess complete", { tensorShape: [1, 3, SIZE, SIZE], tensorMiB: data.byteLength / 1024 / 1024 });
 
       const feeds = { pixel_values: new ort.Tensor("float16", data, [1, 3, SIZE, SIZE]) };
-      const started = performance.now();
-      log("session.run開始", memorySnapshot());
+      const inferStarted = performance.now();
+      log("session.run start", memorySnapshot());
       const outputs = await session.run(feeds);
-      const seconds = (performance.now() - started) / 1000;
-      log("session.run成功", {
-        seconds,
+      const inferSeconds = (performance.now() - inferStarted) / 1000;
+      log("session.run ok", {
+        seconds: inferSeconds,
         outputNames: Object.keys(outputs),
         outputDims: outputs.alpha.dims,
         outputType: outputs.alpha.type,
@@ -272,9 +400,7 @@
 
       const alpha = outputs.alpha.data;
       const alphaIsBitArray = alpha instanceof Uint16Array;
-      const readAlpha = alphaIsBitArray
-        ? (index) => float16BitsToFloat32(alpha[index])
-        : (index) => Number(alpha[index]);
+      const readAlpha = alphaIsBitArray ? (index) => float16BitsToFloat32(alpha[index]) : (index) => Number(alpha[index]);
       const alphaFloat = new Float32Array(alpha.length);
       let alphaMin = Infinity;
       let alphaMax = -Infinity;
@@ -286,23 +412,28 @@
         alphaMax = Math.max(alphaMax, value);
         alphaSum += value;
       }
-      log("alpha統計", {
+      log("Alpha stats", {
         arrayType: alpha.constructor ? alpha.constructor.name : typeof alpha,
-        interpretedAsBits: alphaIsBitArray, min: alphaMin, max: alphaMax,
-        mean: alphaSum / alpha.length, samples: Array.from({ length: 8 }, (_, i) => readAlpha(i)),
+        interpretedAsBits: alphaIsBitArray,
+        min: alphaMin,
+        max: alphaMax,
+        mean: alphaSum / alpha.length,
+        samples: Array.from({ length: 8 }, (_, i) => readAlpha(i)),
       });
+
+      setState("running", "Refining foreground", "Applying browser-side foreground color correction.");
       const postStarted = performance.now();
-      log("PhotoRoom前景色補正開始", { kernelSizes: [90, 6], pixels: plane });
+      log("PhotoRoom foreground correction start", { kernelSizes: [90, 6], pixels: plane });
       const foreground = estimateForegroundPhotoRoom(rgb, alphaFloat, SIZE, SIZE);
       const postSeconds = (performance.now() - postStarted) / 1000;
-      log("PhotoRoom前景色補正完了", { seconds: postSeconds, memory: memorySnapshot() });
+      log("PhotoRoom foreground correction ok", { seconds: postSeconds, memory: memorySnapshot() });
+
       const mask = context.createImageData(SIZE, SIZE);
       for (let p = 0; p < plane; p++) {
-        const value = Math.max(0, Math.min(255, Math.round(alphaFloat[p] * 255)));
         mask.data[p * 4] = Math.round(foreground[p * 3] * 255);
         mask.data[p * 4 + 1] = Math.round(foreground[p * 3 + 1] * 255);
         mask.data[p * 4 + 2] = Math.round(foreground[p * 3 + 2] * 255);
-        mask.data[p * 4 + 3] = value;
+        mask.data[p * 4 + 3] = Math.max(0, Math.min(255, Math.round(alphaFloat[p] * 255)));
       }
       context.putImageData(mask, 0, 0);
       output.width = width;
@@ -310,25 +441,48 @@
       const outputContext = output.getContext("2d");
       outputContext.clearRect(0, 0, width, height);
       outputContext.drawImage(work, 0, 0, width, height);
-      result.style.display = "block";
-      timing.textContent = `推論: ${seconds.toFixed(1)}秒 / 色補正: ${postSeconds.toFixed(1)}秒`;
-      setState("done", "完了", "処理はブラウザ内だけで完了しました。");
+      outputViewer.classList.remove("empty");
+      outputPlaceholder.hidden = true;
+      outputPlaceholder.classList.add("hidden");
+      outputPanZoom.reset();
+      save.disabled = false;
+      timing.textContent = `Inference: ${inferSeconds.toFixed(1)}s / correction: ${postSeconds.toFixed(1)}s`;
+      setState("done", "Done", "Processing finished locally in this browser.");
     } catch (error) {
       const diagnostic = describeError(error);
-      log("画像処理または推論失敗", { ...diagnostic, memory: memorySnapshot() });
-      setState("error", "推論エラー", diagnostic.message + (diagnostic.possibleCause ? ` / ${diagnostic.possibleCause}` : ""));
+      log("Image processing or inference failed", { ...diagnostic, memory: memorySnapshot() });
+      setState("error", session ? "Inference error" : "Model load error", diagnostic.message + (diagnostic.possibleCause ? ` / ${diagnostic.possibleCause}` : ""));
     } finally {
       busy = false;
       fileInput.value = "";
-      log("画像処理終了", memorySnapshot());
+      log("Image processing end", memorySnapshot());
     }
   }
 
-  $("save").addEventListener("click", () => output.toBlob((blob) => {
-    const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = "lucida-onnx-1024-fp16-output.png";
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
-  }, "image/png"));
+  if ("serviceWorker" in navigator) {
+    setState("loading", "Preparing browser cache", "The page may refresh once to enable model download progress.");
+    ensureModelServiceWorker()
+      .then(() => setState("idle", "Ready", "Drop an image on the input panel or click it to begin."))
+      .catch((error) => {
+        log("Model download service worker setup failed", describeError(error));
+        setState("error", "Setup error", describeError(error).message);
+      });
+  }
+  save.addEventListener("click", () => {
+    if (save.disabled || !output.width || !output.height) return;
+    output.toBlob((blob) => {
+      if (!blob) return;
+      const anchor = document.createElement("a");
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = `${OUTPUT_PREFIX}${baseName(currentSourceName)}.png`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(anchor.href), 1000);
+    }, "image/png");
+  });
 })();
+
+
+
+
+
+
