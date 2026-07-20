@@ -13,6 +13,7 @@
   let logSequence = 0;
   let lastModelProgressLog = -5;
   let currentSourceName = "image";
+  let selectedBackground = "transparent";
   let pendingPasteFile = null;
   let pendingPasteUrl = null;
 
@@ -34,9 +35,35 @@
   const work = $("work");
   const timing = $("timing");
   const save = $("save");
+  const backgrounds = $("backgrounds");
   const logOutput = $("logOutput");
   const modelProgress = $("modelProgress");
+  const transparentOutput = document.createElement("canvas");
 
+  function paintBackground(context, width, height) {
+    if (selectedBackground === "transparent") return;
+    if (selectedBackground === "studio") {
+      const gradient = context.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, "#dedfdd");
+      gradient.addColorStop(.52, "#e9e9e7");
+      gradient.addColorStop(1, "#faf9f6");
+      context.fillStyle = gradient;
+    } else {
+      context.fillStyle = { black: "#000000", white: "#ffffff", blue: "#146cff", red: "#e32929" }[selectedBackground];
+    }
+    context.fillRect(0, 0, width, height);
+  }
+
+  function renderOutput() {
+    if (!transparentOutput.width || !transparentOutput.height) return;
+    output.width = transparentOutput.width;
+    output.height = transparentOutput.height;
+    const context = output.getContext("2d");
+    context.clearRect(0, 0, output.width, output.height);
+    paintBackground(context, output.width, output.height);
+    context.drawImage(transparentOutput, 0, 0);
+    outputPanZoom.apply();
+  }
   function log(message, data) {
     const now = new Date().toLocaleTimeString("en-US", { hour12: false });
     let suffix = "";
@@ -237,6 +264,13 @@
 
   navigator.serviceWorker?.addEventListener("message", (event) => {
     const message = event.data;
+    if (message && message.type === "lucida-model-cache") {
+      if (message.status === "hit") log("Model cache hit; loading saved model");
+      if (message.status === "miss") log("Model cache miss; downloading model");
+      if (message.status === "stored") log("Model saved to browser cache");
+      if (message.status === "error") log("Model cache write failed; model will be downloaded again next time", message.message);
+      return;
+    }
     if (!message || message.type !== "lucida-model-progress") return;
     const total = message.total || EXPECTED_MODEL_BYTES;
     const elapsed = Math.max(message.elapsedSeconds, 0.001);
@@ -245,10 +279,12 @@
     const eta = total > message.received ? (total - message.received) / speed : 0;
     modelProgress.hidden = false;
     modelProgress.value = percent;
-    detail.textContent = `Downloading model: ${(message.received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB  ${percent.toFixed(1)}%  ${(speed / 1024 ** 2).toFixed(1)} MiB/s  ETA ${formatDuration(eta)}`;
+    const fromCache = message.source === "cache";
+    const action = fromCache ? "Loading cached model" : "Downloading model";
+    detail.textContent = `${action}: ${(message.received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB  ${percent.toFixed(1)}%  ${(speed / 1024 ** 2).toFixed(1)} MiB/s  ETA ${formatDuration(eta)}`;
     if (message.done || percent >= lastModelProgressLog + 5) {
       lastModelProgressLog = Math.floor(percent / 5) * 5;
-      log(message.done ? "Model download complete" : "Model download progress", {
+      log(message.done ? `${action} complete` : `${action} progress`, {
         percent: Number(percent.toFixed(1)), received: message.received, total,
         speedMiBs: Number((speed / 1024 ** 2).toFixed(1)), etaSeconds: Math.ceil(eta),
       });
@@ -275,7 +311,7 @@
     if (sessionPromise) return sessionPromise;
     const started = performance.now();
     sessionPromise = (async () => {
-      setState("loading", "Loading model", "First use downloads about 451 MiB from Hugging Face. This may take several minutes.");
+      setState("loading", "Loading model", "The first use downloads about 451 MiB; later uses load the saved browser copy.");
       lastModelProgressLog = -5;
       modelProgress.hidden = false;
       modelProgress.value = 0;
@@ -395,6 +431,8 @@
   }
 
   function clearOutput() {
+    transparentOutput.width = 0;
+    transparentOutput.height = 0;
     output.width = 0;
     output.height = 0;
     outputViewer.classList.add("empty");
@@ -494,11 +532,12 @@
         mask.data[p * 4 + 3] = Math.max(0, Math.min(255, Math.round(alphaFloat[p] * 255)));
       }
       context.putImageData(mask, 0, 0);
-      output.width = width;
-      output.height = height;
-      const outputContext = output.getContext("2d");
-      outputContext.clearRect(0, 0, width, height);
-      outputContext.drawImage(work, 0, 0, width, height);
+      transparentOutput.width = width;
+      transparentOutput.height = height;
+      const transparentContext = transparentOutput.getContext("2d");
+      transparentContext.clearRect(0, 0, width, height);
+      transparentContext.drawImage(work, 0, 0, width, height);
+      selectBackground("transparent");
       outputViewer.classList.remove("empty");
       outputPlaceholder.hidden = true;
       outputPlaceholder.classList.add("hidden");
@@ -516,6 +555,20 @@
       log("Image processing end", memorySnapshot());
     }
   }
+
+  function selectBackground(value) {
+    selectedBackground = value;
+    backgrounds.querySelectorAll("[data-background]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.background === value));
+    });
+    renderOutput();
+  }
+
+  backgrounds.addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-background]");
+    if (!choice) return;
+    selectBackground(choice.dataset.background);
+  });
 
   if ("serviceWorker" in navigator) {
     setState("loading", "Preparing browser cache", "The page may refresh once to enable model download progress.");
